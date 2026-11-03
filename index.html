@@ -392,7 +392,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
 
   <div class="foot">
     <p>계산 방식: 월 이용 좌석시간 = 좌석 수 × 운영시간 × 영업일 × 가동률. 이 시간을 상품별 이용 비중으로 나눈 뒤, 상품 1장이 소비하는 좌석시간으로 나눠 판매 수를 구하고 가격을 곱합니다. 1장당 좌석시간은 1회권 = 이용 시간 × 실사용률, 기간권 = 방문 횟수 × 1회 이용시간, 충전권 = 충전 시간 × 소진율입니다. 충전권의 미사용 시간은 좌석을 쓰지 않은 매출로 잡힙니다.</p>
-    <p>사물함 월 매출 = 사물함 수 × 대여율 × Σ(요금제 비중 × 요금 × 한 달(30일 = 4.29주) ÷ 대여 주수). 손익분기 가동률 = (고정비 − 부가매출 공헌이익) ÷ (월 최대 좌석시간 × 좌석시간당 공헌이익). 매입 부가세 환급, 소득세, 대출 원금 상환, 충전권 선수금의 기간 차이는 반영하지 않았습니다. 입력값은 이 브라우저에만 저장됩니다.</p>
+    <p>사물함 월 매출 = 사물함 수 × 대여율 × Σ(요금제 비중 × 요금 × 한 달(30일 = 4.29주) ÷ 대여 주수). 손익분기 가동률 = (고정비 − 부가매출 공헌이익) ÷ (월 최대 좌석시간 × 좌석시간당 공헌이익). 매입 부가세 환급, 소득세, 대출 원금 상환, 충전권 선수금의 기간 차이는 반영하지 않았습니다. 입력값은 어디에도 저장되지 않으며, 페이지를 새로 열면 빈칸으로 시작합니다.</p>
   </div>
 </div>
 
@@ -471,7 +471,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
     fixed: EXAMPLE.fixed.map(([n]) => [n, ''])
   };
   const FIXED_EXAMPLE = Object.fromEntries(EXAMPLE.fixed);
-  const KEY = 'studycafe-bep-v4';
   const SCALARS = ['seats','hours','days','occ','lockers','lockerRate','otherRev','cardFee','royalty','utilVar','supplyVar','invest','investMonths'];
   const CHECKS = ['vat','includeDep'];
   const $ = id => document.getElementById(id);
@@ -541,12 +540,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
     });
     return r;
   });
-  const rawItems = g => [...$('g-' + g).querySelectorAll('.prod')].map(el => {
-    const r = {};
-    el.querySelectorAll('input[data-f]').forEach(inp => r[inp.dataset.f] = inp.value);
-    return r;
-  });
-
   function addFixedRow(name, amount, focus) {
     const id = 'fx' + (seq++);
     const row = document.createElement('div');
@@ -582,18 +575,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
     });
     $('fxList').innerHTML = '';
     (s.fixed || BLANK.fixed).forEach(([n, a]) => addFixedRow(n, a));
-  }
-  // 빈칸을 빈칸 그대로 저장하려고 화면의 입력값을 문자열로 저장
-  function save() {
-    const out = {};
-    SCALARS.forEach(k => out[k] = $(k).value);
-    CHECKS.forEach(k => out[k] = $(k).checked);
-    Object.keys(GROUPS).forEach(g => out[g] = rawItems(g));
-    out.fixed = [...document.querySelectorAll('.fx-row')].map(r => [r.querySelector('.name').value, r.querySelector('.amt').value]);
-    try { localStorage.setItem(KEY, JSON.stringify(out)); } catch (e) {}
-  }
-  function load() {
-    try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
   }
 
   // ---------- 계산 ----------
@@ -759,7 +740,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
 
   function update() {
     const s = readState();
-    save();
     const M = model(s);
     const occBlank = $('occ').value.trim() === '';
     const occ = Math.min(Math.max(s.occ, 0), 100) / 100;
@@ -907,7 +887,9 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
   SCALARS.forEach(k => setExample($(k), EXAMPLE[k]));
   // ?example 로 열면 예시값이 채워진 상태로 시작 (데모 링크용)
   const wantsExample = new URLSearchParams(location.search).has('example');
-  applyState(wantsExample ? EXAMPLE : (load() || BLANK));
+  applyState(wantsExample ? EXAMPLE : BLANK);   // 입력값은 저장하지 않으므로 열 때마다 빈칸
+  // 예전 버전이 브라우저에 남긴 입력값 정리
+  try { ['studycafe-bep-v1', 'studycafe-bep-v2', 'studycafe-bep-v3', 'studycafe-bep-v4'].forEach(k => localStorage.removeItem(k)); } catch (e) {}
   update();
 })();
 </script>
