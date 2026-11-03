@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>스터디카페 손익분기 계산기</title>
+<meta name="description" content="좌석 수, 이용권 구성, 변동비·고정비를 넣어 스터디카페의 월 손익분기 하루 가동률을 계산합니다.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: 왼쪽 입력 시트(운영→이용권 매출→사물함→변동비→고정비→투자), 오른쪽 고정 결과 패널(손익분기 가동률 → 좌석 배치도 → 이용권별 판매 → 손익계산서 → 차트 → 민감도) */
+:root {
+  --bg: #eef1f3;
+  --surface: #ffffff;
+  --ink: #16212a;
+  --muted: #5a6873;
+  --line: #d6dde2;
+  --accent: #b86e0c;        /* 스탠드 조명 앰버 = 1회권 */
+  --accent-soft: #f6e6cc;
+  --c-period: #34557d;      /* 기간권 */
+  --c-time: #7a5c99;        /* 충전권 */
+  --c-locker: #4f6b5e;      /* 사물함 */
+  --pos: #1c7656;
+  --pos-soft: #d9efe5;
+  --neg: #b8382b;
+  --neg-soft: #f6dcd8;
+  --seat-empty: #dfe5e9;
+  --seat-on: #16212a;
+  --field: #f6f8f9;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151a; --surface: #161f26; --ink: #e5ebee; --muted: #93a2ad; --line: #28343d;
+    --accent: #f0a33c; --accent-soft: #3b2c16; --c-period: #7fa6d6; --c-time: #b89ddb; --c-locker: #8fb8a4;
+    --pos: #4fc596; --pos-soft: #16352a;
+    --neg: #f0786b; --neg-soft: #3d1f1b; --seat-empty: #25313a; --seat-on: #d5dee3; --field: #1b252d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151a; --surface: #161f26; --ink: #e5ebee; --muted: #93a2ad; --line: #28343d;
+  --accent: #f0a33c; --accent-soft: #3b2c16; --c-period: #7fa6d6; --c-time: #b89ddb; --c-locker: #8fb8a4;
+  --pos: #4fc596; --pos-soft: #16352a;
+  --neg: #f0786b; --neg-soft: #3d1f1b; --seat-empty: #25313a; --seat-on: #d5dee3; --field: #1b252d;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body);
+  font-size: 15px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 48px;
+}
+.num, input, .tabular { font-variant-numeric: tabular-nums; }
+.wrap { max-width: 1680px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+header.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+header.top h1 { font-size: 26px; font-weight: 700; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+header.top p { margin: 4px 0 0; color: var(--muted); max-width: 62ch; }
+.btn {
+  font: inherit; font-size: 13px; font-weight: 500; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer;
+}
+.btn.sm { font-size: 12.5px; padding: 4px 10px; }
+.top-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.box input::placeholder, .fx-row .name::placeholder { color: var(--muted); opacity: 0.55; font-weight: 400; }
+.empty-card { display: flex; flex-direction: column; gap: 8px; border-style: dashed; }
+.empty-card h3 { color: var(--accent); }
+.empty-card p { margin: 0; font-size: 13.5px; color: var(--muted); }
+.empty-card b { color: var(--ink); }
+.btn:hover { border-color: var(--muted); }
+.btn:focus-visible, input:focus-visible, .del:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); gap: 24px; align-items: start; }
+@media (max-width: 920px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* 입력 시트 */
+.sheet, .sheet .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* 넓은 화면: 입력 2열 + 결과 1열 */
+@media (min-width: 1280px) {
+  .grid { grid-template-columns: minmax(0, 2fr) minmax(380px, 1fr); }
+  .sheet { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+}
+.sec { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.sec-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.sec-h h2 { margin: 0; font-size: 16px; font-weight: 700; }
+.sec-h .tag { font-size: 11px; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; font-family: var(--font-num); }
+.hint { margin: -6px 0 0; font-size: 12.5px; color: var(--muted); }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px 14px; }
+.fields.sm { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 10px; }
+.f { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.f label { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+.box { display: flex; align-items: center; background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; }
+.box:focus-within { border-color: var(--accent); }
+.box input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: 500 15px/1 var(--font-num); padding: 9px 0; text-align: right; outline: none; }
+.box .u { font-size: 12.5px; color: var(--muted); padding-left: 6px; white-space: nowrap; }
+.f.share .box { background: var(--accent-soft); }
+input[type=number] { -moz-appearance: textfield; }
+input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+.slider-row { display: flex; flex-direction: column; gap: 8px; }
+.slider-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.slider-top label { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+.slider-top .box { width: 108px; }
+input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
+.derived { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 13px; background: var(--field); border: 1px dashed var(--line); border-radius: 8px; padding: 9px 12px; color: var(--muted); }
+.derived b { color: var(--ink); font-family: var(--font-num); font-weight: 600; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13.5px; cursor: pointer; }
+.check input { margin-top: 3px; accent-color: var(--accent); }
+.check small { display: block; color: var(--muted); font-size: 12px; }
+
+/* 이용권·사물함 목록 */
+.mixbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--seat-empty); }
+.mixbar i { display: block; height: 100%; }
+.mix-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); }
+.mix-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.mix-legend b { color: var(--ink); font-family: var(--font-num); font-weight: 600; }
+.sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex: none; }
+.warn { font-size: 12.5px; color: var(--neg); margin: -4px 0 0; }
+.group-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+.group-h .t { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 700; }
+.group-h small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.prods { display: flex; flex-direction: column; gap: 10px; }
+.prods:empty::before { content: "상품이 없습니다. 추가 버튼으로 넣어 주세요."; font-size: 12.5px; color: var(--muted); padding: 4px 2px; }
+.prod { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.prod-h { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.prod-h .nm { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; min-width: 0; }
+.prod-h .right { display: inline-flex; align-items: center; gap: 4px; }
+.prod-h .rate { font: 600 13px var(--font-num); white-space: nowrap; }
+.prod-h .rate small { font-family: var(--font-body); font-weight: 400; color: var(--muted); font-size: 11.5px; margin-right: 4px; }
+.pnote { font-size: 12px; color: var(--muted); margin: -2px 0 0; }
+.pnote.bad { color: var(--neg); }
+
+/* 고정비 목록 */
+.fx-list { display: flex; flex-direction: column; gap: 8px; }
+.fx-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 150px) 32px; gap: 8px; align-items: center; }
+.fx-row .name { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; font: 400 14px var(--font-body); color: var(--ink); min-width: 0; width: 100%; }
+.fx-row .name:focus { border-color: var(--accent); outline: none; }
+.del { width: 30px; height: 30px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--muted); font-size: 18px; cursor: pointer; line-height: 1; flex: none; }
+.del:hover { border-color: var(--line); color: var(--neg); }
+.fx-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; }
+.fx-foot .sum { font-size: 13.5px; color: var(--muted); }
+.fx-foot .sum b { color: var(--ink); font-family: var(--font-num); font-size: 15px; }
+
+/* 결과 패널 */
+.result { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (max-width: 920px) { .result { position: static; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; min-width: 0; }
+.bep { display: flex; flex-direction: column; gap: 14px; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.bep-label { font-size: 12.5px; color: var(--muted); font-weight: 600; letter-spacing: 0.04em; }
+.bep-main { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 20px; }
+.bep-num { font: 600 52px/1 var(--font-num); letter-spacing: -0.03em; color: var(--accent); }
+.bep-num small { font-size: 26px; margin-left: 2px; }
+.bep-desc { font-size: 14px; color: var(--muted); padding-bottom: 6px; }
+.bep-desc b { color: var(--ink); }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; border-radius: 999px; padding: 4px 11px; }
+.chip.pos { background: var(--pos-soft); color: var(--pos); }
+.chip.neg { background: var(--neg-soft); color: var(--neg); }
+.chip i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.status { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13.5px; color: var(--muted); }
+
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.kpi { background: var(--surface); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kpi span { font-size: 11.5px; color: var(--muted); }
+.kpi b { font: 600 16px/1.3 var(--font-num); overflow-wrap: anywhere; }
+@media (max-width: 480px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* 좌석 배치도 */
+.seatmap-h { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.seatmap-h h3, .card h3 { margin: 0; font-size: 14.5px; font-weight: 700; }
+.legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.seats { display: grid; grid-template-columns: repeat(auto-fill, minmax(18px, 1fr)); gap: 4px; }
+.seat { aspect-ratio: 1; max-width: 100%; border-radius: 4px 4px 2px 2px; background: var(--seat-empty); position: relative; }
+.seat.on { background: var(--seat-on); }
+.seat.need { box-shadow: 0 0 0 2px var(--accent) inset; }
+.seat.on.need { box-shadow: 0 0 0 2px var(--accent); }
+.seat.part::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--seat-on); clip-path: inset(0 calc(100% - var(--p)) 0 0); }
+.seat-note { margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
+
+/* 손익계산서 */
+.pl { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; }
+.pl td { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.pl td:last-child { text-align: right; font-family: var(--font-num); white-space: nowrap; padding-left: 12px; }
+.pl tr.minor td { color: var(--muted); font-size: 13px; padding-left: 14px; }
+.pl tr.minor td:last-child { padding-left: 12px; }
+.pl tr.total td { font-weight: 700; border-bottom: 0; padding-top: 10px; font-size: 15.5px; }
+.pl tr.mid td { font-weight: 600; }
+.pos-t { color: var(--pos); }
+.neg-t { color: var(--neg); }
+.card-h { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.card-h small { color: var(--muted); font-size: 12.5px; }
+
+/* 차트 */
+.chart-wrap { margin-top: 10px; overflow-x: auto; }
+.chart-wrap svg { display: block; width: 100%; min-width: 300px; height: auto; }
+.chart-wrap text { font-family: var(--font-num); font-size: 11px; fill: var(--muted); }
+
+/* 표 */
+.tbl-wrap { overflow-x: auto; margin-top: 10px; }
+.sens { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 380px; }
+.sens th { text-align: right; font-weight: 500; color: var(--muted); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.sens th:first-child, .sens td:first-child { text-align: left; }
+.sens td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); font-family: var(--font-num); white-space: nowrap; }
+.sens td:first-child { font-family: var(--font-body); }
+.sens td .nm { display: inline-flex; align-items: center; gap: 6px; }
+.sens td.hl { color: var(--accent); font-weight: 600; }
+.sens tr.cur td { background: var(--accent-soft); }
+.sens tr.flip td:first-child::after { content: "흑자 전환"; font-family: var(--font-body); font-size: 10.5px; font-weight: 600; color: var(--pos); margin-left: 6px; }
+.sens tr.grp td { font-family: var(--font-body); font-size: 11.5px; font-weight: 600; color: var(--muted); padding-top: 10px; }
+.sens tfoot td { font-weight: 600; border-bottom: 0; }
+.foot { font-size: 12.5px; color: var(--muted); max-width: 80ch; }
+.foot p { margin: 0 0 6px; }
+
+/* 모바일 하단 요약 바 */
+.mbar { display: none; }
+@media (max-width: 920px) {
+  body { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+  .mbar {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    justify-content: space-between; align-items: center; gap: 12px;
+    background: var(--surface); border-top: 1px solid var(--line);
+    padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  }
+  .mbar .l span { display: block; font-size: 11px; color: var(--muted); }
+  .mbar .l b { font: 600 22px/1.1 var(--font-num); color: var(--accent); }
+  .mbar .r { text-align: right; font-size: 12px; color: var(--muted); }
+  .mbar .r b { display: block; font: 600 15px var(--font-num); }
+}
+@media (prefers-reduced-motion: no-preference) { .mixbar i { transition: width .2s ease; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>스터디카페 손익분기 계산기</h1>
+      <p>좌석 수, 이용권별 가격과 비중, 비용을 넣으면 한 달 기준으로 하루 가동률이 몇 %일 때부터 흑자인지 계산합니다. 칸에 흐리게 보이는 숫자는 60석 매장 예시입니다.</p>
+    </div>
+    <div class="top-actions">
+      <button class="btn" id="fillExample" type="button">예시값 채우기</button>
+      <button class="btn" id="clearAll" type="button">모두 지우기</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <!-- 입력 -->
+    <div class="sheet">
+      <div class="col">
+      <section class="sec">
+        <div class="sec-h"><h2>운영 기본</h2><span class="tag">Capacity</span></div>
+        <div class="fields">
+          <div class="f"><label for="seats">좌석 수</label><div class="box"><input id="seats" type="number" inputmode="numeric" min="1"><span class="u">석</span></div></div>
+          <div class="f"><label for="hours">하루 운영시간</label><div class="box"><input id="hours" type="number" inputmode="decimal" min="1" max="24"><span class="u">시간</span></div></div>
+          <div class="f"><label for="days">월 영업일</label><div class="box"><input id="days" type="number" inputmode="numeric" min="1" max="31"><span class="u">일</span></div></div>
+        </div>
+        <div class="slider-row">
+          <div class="slider-top"><label for="occ">예상 하루 가동률</label><div class="box"><input id="occ" type="number" inputmode="decimal" min="0" max="100" step="0.5"><span class="u">%</span></div></div>
+          <input id="occRange" type="range" min="0" max="100" step="0.5" aria-label="예상 하루 가동률">
+        </div>
+        <p class="hint">가동률 = 하루 실제 이용 좌석시간 ÷ (좌석 수 × 운영시간). 60석·24시간이면 1,440 좌석시간이 100%입니다.</p>
+      </section>
+
+      <section class="sec">
+        <div class="sec-h"><h2>이용권 매출</h2><span class="tag">Revenue</span></div>
+        <p class="hint">상품마다 이용 비중을 넣어 주세요. 전체 이용시간 중 그 상품으로 앉은 시간의 비율입니다. 합계가 100%가 아니면 비율대로 환산합니다.</p>
+        <div class="mixbar" id="mixbar"></div>
+        <div class="mix-legend" id="mixLegend"></div>
+        <p class="warn" id="mixWarn" hidden></p>
+
+        <div class="group-h"><span class="t"><span class="sw" style="background:var(--accent)"></span>1회권 <small>시간 단위 당일 이용</small></span><button class="btn sm" type="button" data-add="once">+ 1회권 추가</button></div>
+        <div class="prods" id="g-once"></div>
+        <div class="group-h"><span class="t"><span class="sw" style="background:var(--c-period)"></span>기간권 <small>기간 내 무제한 이용</small></span><button class="btn sm" type="button" data-add="period">+ 기간권 추가</button></div>
+        <div class="prods" id="g-period"></div>
+        <div class="group-h"><span class="t"><span class="sw" style="background:var(--c-time)"></span>충전권 <small>충전 시간 차감, 유효기간 있음</small></span><button class="btn sm" type="button" data-add="time">+ 충전권 추가</button></div>
+        <div class="prods" id="g-time"></div>
+
+        <div class="derived"><span>좌석 1시간 이용당 평균 매출 (가중평균)</span><b id="mixRate"></b></div>
+        <label class="check"><input id="vat" type="checkbox"><span>판매가에 부가세 10% 포함<small>매출에서 1/11을 빼고 공급가 기준으로 손익을 계산합니다.</small></span></label>
+      </section>
+
+      </div>
+      <div class="col">
+      <section class="sec">
+        <div class="sec-h"><h2>사물함·부가 매출</h2><span class="tag">Extra</span></div>
+        <div class="fields">
+          <div class="f"><label for="lockers">사물함 수</label><div class="box"><input id="lockers" type="number" inputmode="numeric" min="0"><span class="u">개</span></div></div>
+          <div class="f"><label for="lockerRate">사물함 대여율</label><div class="box"><input id="lockerRate" type="number" inputmode="decimal" min="0" max="100"><span class="u">%</span></div></div>
+        </div>
+        <div class="group-h"><span class="t"><span class="sw" style="background:var(--c-locker)"></span>사물함 요금제 <small>대여 기간(주)별 요금</small></span><button class="btn sm" type="button" data-add="locker">+ 요금제 추가</button></div>
+        <div class="prods" id="g-locker"></div>
+        <p class="warn" id="lockerWarn" hidden></p>
+        <div class="derived"><span id="lockerSumLabel">사물함 월 매출 (판매가)</span><b id="lockerSum"></b></div>
+        <div class="fields">
+          <div class="f"><label for="otherRev">기타 월 매출 (음료·프린트 등)</label><div class="box"><input id="otherRev" class="money" type="text" inputmode="numeric"><span class="u">원</span></div></div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-h"><h2>변동비</h2><span class="tag">Variable</span></div>
+        <p class="hint">이용량이나 매출에 비례해 늘어나는 비용입니다.</p>
+        <div class="fields">
+          <div class="f"><label for="cardFee">결제수수료 (카드·키오스크·앱)</label><div class="box"><input id="cardFee" type="number" inputmode="decimal" min="0" step="0.1"><span class="u">% 매출</span></div></div>
+          <div class="f"><label for="royalty">프랜차이즈 로열티</label><div class="box"><input id="royalty" type="number" inputmode="decimal" min="0" step="0.1"><span class="u">% 매출</span></div></div>
+          <div class="f"><label for="utilVar">전기·냉난방 변동분</label><div class="box"><input id="utilVar" class="money" type="text" inputmode="numeric"><span class="u">원/좌석시간</span></div></div>
+          <div class="f"><label for="supplyVar">소모품 (커피·간식·휴지 등)</label><div class="box"><input id="supplyVar" class="money" type="text" inputmode="numeric"><span class="u">원/좌석시간</span></div></div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-h"><h2>고정비 (월)</h2><span class="tag">Fixed</span></div>
+        <p class="hint">손님이 없어도 매달 나가는 비용입니다. 항목 이름과 금액을 바꾸거나 추가할 수 있습니다.</p>
+        <div class="fx-list" id="fxList"></div>
+        <div class="fx-foot">
+          <button class="btn" id="fxAdd" type="button">+ 항목 추가</button>
+          <span class="sum">고정비 합계 <b id="fxSum"></b></span>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-h"><h2>초기 투자</h2><span class="tag">Capex</span></div>
+        <div class="fields">
+          <div class="f"><label for="invest">인테리어·집기·가맹비 등</label><div class="box"><input id="invest" class="money" type="text" inputmode="numeric"><span class="u">원</span></div></div>
+          <div class="f"><label for="investMonths">상각 기간</label><div class="box"><input id="investMonths" type="number" inputmode="numeric" min="1"><span class="u">개월</span></div></div>
+        </div>
+        <label class="check"><input id="includeDep" type="checkbox"><span>감가상각비를 고정비에 포함<small id="depNote"></small></span></label>
+      </section>
+      </div>
+    </div>
+
+    <!-- 결과 -->
+    <aside class="result" aria-live="polite">
+      <div class="card empty-card" id="resultEmpty" hidden>
+        <h3>값을 입력하면 계산됩니다</h3>
+        <p>아직 비어 있는 값: <b id="emptyList"></b></p>
+        <p>이용권은 가격과 이용 비중을 하나 이상 넣어야 합니다. 먼저 어떻게 나오는지 보려면 위의 "예시값 채우기"를 눌러 보세요.</p>
+      </div>
+      <div class="card bep">
+        <span class="bep-label">손익분기 하루 가동률</span>
+        <div class="bep-main">
+          <div class="bep-num" id="bepNum">–</div>
+          <div class="bep-desc" id="bepDesc"></div>
+        </div>
+        <div class="status" id="status"></div>
+        <div class="kpis">
+          <div class="kpi"><span>손익분기 월 매출 (공급가)</span><b id="kBepRev"></b></div>
+          <div class="kpi"><span>손익분기 월 이용권 판매</span><b id="kSales"></b></div>
+          <div class="kpi"><span>좌석시간당 공헌이익</span><b id="kUnit"></b></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="seatmap-h">
+          <h3>좌석으로 보면</h3>
+          <div class="legend">
+            <span><i style="background:var(--seat-on)"></i>예상 평균 이용</span>
+            <span><i style="box-shadow:0 0 0 2px var(--accent) inset"></i>손익분기 필요</span>
+          </div>
+        </div>
+        <div class="seats" id="seats-map"></div>
+        <p class="seat-note" id="seatNote"></p>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h3>이용권별 월 판매 수</h3><small>손익분기 vs 예상 가동률</small></div>
+        <div class="tbl-wrap"><table class="sens" id="prodTbl"></table></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h3>월 손익계산서</h3><small id="plCaption"></small></div>
+        <table class="pl" id="pl"></table>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h3>가동률별 월 영업이익</h3><small>단위: 만원</small></div>
+        <div class="chart-wrap" id="chart"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h3>가동률 민감도</h3><small>월 기준, 공급가</small></div>
+        <div class="tbl-wrap"><table class="sens" id="sens"></table></div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="foot">
+    <p>계산 방식: 월 이용 좌석시간 = 좌석 수 × 운영시간 × 영업일 × 가동률. 이 시간을 상품별 이용 비중으로 나눈 뒤, 상품 1장이 소비하는 좌석시간으로 나눠 판매 수를 구하고 가격을 곱합니다. 1장당 좌석시간은 1회권 = 이용 시간 × 실사용률, 기간권 = 방문 횟수 × 1회 이용시간, 충전권 = 충전 시간 × 소진율입니다. 충전권의 미사용 시간은 좌석을 쓰지 않은 매출로 잡힙니다.</p>
+    <p>사물함 월 매출 = 사물함 수 × 대여율 × Σ(요금제 비중 × 요금 × 한 달(30일 = 4.29주) ÷ 대여 주수). 손익분기 가동률 = (고정비 − 부가매출 공헌이익) ÷ (월 최대 좌석시간 × 좌석시간당 공헌이익). 매입 부가세 환급, 소득세, 대출 원금 상환, 충전권 선수금의 기간 차이는 반영하지 않았습니다. 입력값은 이 브라우저에만 저장됩니다.</p>
+  </div>
+</div>
+
+<div class="mbar" aria-hidden="true">
+  <div class="l"><span>손익분기 가동률</span><b id="mBep">–</b></div>
+  <div class="r">예상 가동률 <span id="mOcc"></span><b id="mProfit"></b></div>
+</div>
+
+<script>
+(() => {
+  const WEEKS_PER_MONTH = 30 / 7;
+  // 상품 그룹: fields = [키, 라벨, 단위, money 여부], per = 1장이 소비하는 좌석시간
+  // example = 빈칸에 흐리게 보이는 예시, blankAs = 비워 두면 쓰는 값
+  const GROUPS = {
+    once: { name: '1회권', color: 'var(--accent)',
+      label: r => r.hours > 0 ? `1회권 ${fmtH(r.hours)}시간` : '1회권',
+      fields: [['hours', '이용 시간', '시간'], ['price', '가격', '원', 1], ['use', '실사용률', '%'], ['share', '이용 비중', '%']],
+      per: r => r.hours * r.use / 100,
+      example: { hours: 4, price: 5000, use: 100, share: 4 }, blankAs: { use: 100 } },
+    period: { name: '기간권', color: 'var(--c-period)',
+      label: r => r.days > 0 ? `기간권 ${fmtH(r.days)}일` : '기간권',
+      fields: [['days', '기간', '일'], ['price', '가격', '원', 1], ['visits', '기간 중 방문', '회'], ['hours', '1회 평균 이용', '시간'], ['share', '이용 비중', '%']],
+      per: r => r.visits * r.hours,
+      example: { days: 28, price: 140000, visits: 20, hours: 7, share: 35 } },
+    time: { name: '충전권', color: 'var(--c-time)',
+      label: r => r.hours > 0 ? `충전권 ${fmtH(r.hours)}시간` : '충전권',
+      fields: [['hours', '충전 시간', '시간'], ['price', '가격', '원', 1], ['valid', '유효기간', '일'], ['use', '소진율', '%'], ['share', '이용 비중', '%']],
+      per: r => r.hours * r.use / 100,
+      example: { hours: 50, price: 75000, valid: 30, use: 95, share: 15 }, blankAs: { use: 100 } },
+    locker: { name: '사물함', color: 'var(--c-locker)',
+      label: r => r.weeks > 0 ? `사물함 ${fmtH(r.weeks)}주` : '사물함',
+      fields: [['weeks', '대여 기간', '주'], ['price', '요금', '원', 1], ['share', '대여 비중', '%']],
+      example: { weeks: 4, price: 10000, share: 70 } }
+  };
+  const SEAT_GROUPS = ['once', 'period', 'time'];
+
+  const EXAMPLE = {
+    seats: 60, hours: 24, days: 30, occ: 30,
+    once: [
+      { hours: 2, price: 3000, use: 100, share: 3 },
+      { hours: 4, price: 5000, use: 95, share: 4 },
+      { hours: 6, price: 7000, use: 92, share: 4 },
+      { hours: 12, price: 10000, use: 67, share: 2 },
+      { hours: 24, price: 12000, use: 38, share: 2 }
+    ],
+    period: [
+      { days: 14, price: 80000, visits: 10, hours: 6, share: 10 },
+      { days: 28, price: 140000, visits: 20, hours: 7, share: 35 }
+    ],
+    time: [
+      { hours: 50, price: 75000, valid: 30, use: 95, share: 15 },
+      { hours: 100, price: 130000, valid: 60, use: 92, share: 15 },
+      { hours: 200, price: 230000, valid: 90, use: 90, share: 10 }
+    ],
+    locker: [
+      { weeks: 1, price: 4000, share: 10 },
+      { weeks: 2, price: 7000, share: 20 },
+      { weeks: 4, price: 10000, share: 70 }
+    ],
+    lockers: 40, lockerRate: 60, otherRev: 0,
+    vat: true,
+    cardFee: 2.5, royalty: 0, utilVar: 60, supplyVar: 40,
+    fixed: [
+      ['임대료', 4500000], ['관리비', 700000], ['전기·가스 기본요금', 900000],
+      ['수도·인터넷·통신', 200000], ['인건비 (청소·관리 아르바이트)', 1800000],
+      ['키오스크·출입관리 시스템', 250000], ['보안·CCTV', 100000],
+      ['청소·위생용품', 200000], ['화재·배상 보험', 80000],
+      ['마케팅 (플레이스·전단)', 300000], ['세무 기장료', 150000]
+    ],
+    invest: 150000000, investMonths: 60, includeDep: true
+  };
+  // 처음 여는 사람에게는 빈칸: 고정비는 항목 이름만 남기고 금액을 비움
+  const BLANK = {
+    vat: true, includeDep: true,
+    once: [{}], period: [{}], time: [{}], locker: [{}],
+    fixed: EXAMPLE.fixed.map(([n]) => [n, ''])
+  };
+  const FIXED_EXAMPLE = Object.fromEntries(EXAMPLE.fixed);
+  const KEY = 'studycafe-bep-v4';
+  const SCALARS = ['seats','hours','days','occ','lockers','lockerRate','otherRev','cardFee','royalty','utilVar','supplyVar','invest','investMonths'];
+  const CHECKS = ['vat','includeDep'];
+  const $ = id => document.getElementById(id);
+
+  const won = n => Math.round(n).toLocaleString('ko-KR') + '원';
+  const man = n => {
+    const v = Math.round(n / 10000);
+    return (v < 0 ? '−' : '') + Math.abs(v).toLocaleString('ko-KR') + '만원';
+  };
+  const signedMan = n => (n >= 0 ? '+' : '') + man(n);
+  const pct = (x, d = 1) => (x * 100).toFixed(d) + '%';
+  const num = (x, d = 0) => Number(x).toLocaleString('ko-KR', { maximumFractionDigits: d, minimumFractionDigits: d });
+  function fmtH(h) { return Number(h || 0).toLocaleString('ko-KR', { maximumFractionDigits: 1 }); }
+  // 같은 그룹 안에서 순서대로 옅어지는 색
+  const shade = (base, i, n) => i === 0 ? base : `color-mix(in srgb, ${base} ${Math.round(100 - i * Math.min(20, 65 / Math.max(n - 1, 1)))}%, var(--surface))`;
+
+  // ---------- 입력 ----------
+  const parse = el => {
+    const v = el.classList.contains('money') ? el.value.replace(/[^\d]/g, '') : el.value;
+    const n = parseFloat(v);
+    return isFinite(n) ? n : 0;
+  };
+  const fmtInput = (el, v) => el.classList.contains('money') ? Math.round(v).toLocaleString('ko-KR') : String(v);
+  const setVal = (el, v) => {
+    const n = typeof v === 'number' ? v : parseFloat(String(v ?? '').replace(/,/g, ''));
+    el.value = isFinite(n) ? fmtInput(el, n) : '';
+  };
+  const setExample = (el, v) => { if (v != null) el.placeholder = '예: ' + fmtInput(el, v); };
+  const formatMoney = el => {
+    const pos = el.selectionStart ?? el.value.length;
+    const before = el.value.slice(0, pos).replace(/\D/g, '').replace(/^0+(?=\d)/, '').length;
+    const digits = el.value.replace(/\D/g, '');
+    el.value = digits ? Number(digits).toLocaleString('ko-KR') : '';
+    let i = 0, c = 0;
+    while (i < el.value.length && c < before) { if (/\d/.test(el.value[i])) c++; i++; }
+    try { el.setSelectionRange(i, i); } catch (e) {}
+  };
+
+  let seq = 0;
+  function addItemRow(g, data, focus) {
+    const G = GROUPS[g], uid = 'r' + (seq++);
+    const el = document.createElement('div');
+    el.className = 'prod';
+    el.dataset.uid = uid;
+    el.innerHTML =
+      `<div class="prod-h"><span class="nm"><span class="sw"></span><span class="pname"></span></span>` +
+      `<span class="right"><span class="rate"><small class="rl"></small><span class="rv"></span></span>` +
+      `<button class="del" type="button" aria-label="이 상품 삭제">×</button></span></div>` +
+      `<div class="fields sm">` + G.fields.map(([f, lab, u, money]) =>
+        `<div class="f${f === 'share' ? ' share' : ''}"><label for="${uid}_${f}">${lab}</label><div class="box">` +
+        `<input id="${uid}_${f}" data-f="${f}"${money ? ' class="money" type="text" inputmode="numeric"' : ' type="number" inputmode="decimal" min="0" step="any"'}>` +
+        `<span class="u">${u}</span></div></div>`).join('') + `</div>` +
+      `<p class="pnote"></p>`;
+    el.querySelectorAll('input[data-f]').forEach(inp => {
+      setVal(inp, data[inp.dataset.f]);
+      setExample(inp, G.example[inp.dataset.f]);
+    });
+    el.querySelector('.del').addEventListener('click', () => { el.remove(); update(); });
+    $('g-' + g).appendChild(el);
+    if (focus) el.querySelector('input').focus();
+  }
+  const readItems = g => [...$('g-' + g).querySelectorAll('.prod')].map(el => {
+    const r = { el }, blankAs = GROUPS[g].blankAs || {};
+    el.querySelectorAll('input[data-f]').forEach(inp => {
+      const f = inp.dataset.f;
+      r[f] = inp.value.trim() === '' && f in blankAs ? blankAs[f] : parse(inp);
+    });
+    return r;
+  });
+  const rawItems = g => [...$('g-' + g).querySelectorAll('.prod')].map(el => {
+    const r = {};
+    el.querySelectorAll('input[data-f]').forEach(inp => r[inp.dataset.f] = inp.value);
+    return r;
+  });
+
+  function addFixedRow(name, amount, focus) {
+    const id = 'fx' + (seq++);
+    const row = document.createElement('div');
+    row.className = 'fx-row';
+    row.innerHTML =
+      `<input class="name" id="${id}-n" type="text" aria-label="고정비 항목 이름">` +
+      `<div class="box"><input class="money amt" id="${id}-a" type="text" inputmode="numeric" aria-label="월 금액"><span class="u">원</span></div>` +
+      `<button class="del" type="button" aria-label="항목 삭제">×</button>`;
+    row.querySelector('.name').value = name;
+    row.querySelector('.name').placeholder = '항목 이름';
+    setVal(row.querySelector('.amt'), amount);
+    setExample(row.querySelector('.amt'), FIXED_EXAMPLE[name]);
+    row.querySelector('.del').addEventListener('click', () => { row.remove(); update(); });
+    $('fxList').appendChild(row);
+    if (focus) row.querySelector('.name').focus();
+  }
+
+  function readState() {
+    const s = {};
+    SCALARS.forEach(k => s[k] = parse($(k)));
+    CHECKS.forEach(k => s[k] = $(k).checked);
+    Object.keys(GROUPS).forEach(g => s[g] = readItems(g));
+    s.fixed = [...document.querySelectorAll('.fx-row')].map(r => [r.querySelector('.name').value, parse(r.querySelector('.amt'))]);
+    return s;
+  }
+  function applyState(s) {
+    SCALARS.forEach(k => setVal($(k), s[k]));
+    CHECKS.forEach(k => $(k).checked = s[k] ?? BLANK[k]);
+    $('occRange').value = $('occ').value || 0;
+    Object.keys(GROUPS).forEach(g => {
+      $('g-' + g).innerHTML = '';
+      (s[g] || BLANK[g]).forEach(r => addItemRow(g, r));
+    });
+    $('fxList').innerHTML = '';
+    (s.fixed || BLANK.fixed).forEach(([n, a]) => addFixedRow(n, a));
+  }
+  // 빈칸을 빈칸 그대로 저장하려고 화면의 입력값을 문자열로 저장
+  function save() {
+    const out = {};
+    SCALARS.forEach(k => out[k] = $(k).value);
+    CHECKS.forEach(k => out[k] = $(k).checked);
+    Object.keys(GROUPS).forEach(g => out[g] = rawItems(g));
+    out.fixed = [...document.querySelectorAll('.fx-row')].map(r => [r.querySelector('.name').value, r.querySelector('.amt').value]);
+    try { localStorage.setItem(KEY, JSON.stringify(out)); } catch (e) {}
+  }
+  function load() {
+    try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+  }
+
+  // ---------- 계산 ----------
+  function model(s) {
+    // 좌석 이용권
+    const raw = SEAT_GROUPS.flatMap(g => s[g].map((r, i) => ({ g, r, color: shade(GROUPS[g].color, i, s[g].length) })));
+    const shareSum = raw.reduce((a, x) => a + Math.max(x.r.share, 0), 0);
+    const prods = raw.map(x => {
+      const per = GROUPS[x.g].per(x.r);
+      return { ...x, name: GROUPS[x.g].label(x.r), per, price: x.r.price,
+        w: shareSum > 0 ? Math.max(x.r.share, 0) / shareSum : 0,
+        rate: per > 0 ? x.r.price / per : 0 };
+    });
+    // 사물함
+    const lkSum = s.locker.reduce((a, r) => a + Math.max(r.share, 0), 0);
+    const lockerPlans = s.locker.map((r, i) => ({ r, color: shade(GROUPS.locker.color, i, s.locker.length),
+      w: lkSum > 0 ? Math.max(r.share, 0) / lkSum : 1 / s.locker.length,   // 비중이 모두 비면 똑같이 나눔
+      monthly: r.weeks > 0 ? r.price * WEEKS_PER_MONTH / r.weeks : 0 }));
+    const perLocker = lockerPlans.reduce((a, p) => a + p.w * p.monthly, 0);
+    const rented = s.lockers * Math.min(Math.max(s.lockerRate, 0), 100) / 100;
+    const lockerGross = rented * perLocker;
+
+    const cap = s.seats * s.hours * s.days;                    // 월 최대 좌석시간
+    const gRate = prods.reduce((a, x) => a + x.w * x.rate, 0); // 좌석시간당 판매가 매출
+    const vatF = s.vat ? 1.1 : 1;
+    const fee = s.cardFee / 100, roy = s.royalty / 100;
+    const unitVar = s.utilVar + s.supplyVar;
+    // 좌석시간당 공헌이익: 공급가 − 결제수수료(판매가 기준) − 로열티(공급가 기준) − 단위 변동비
+    const m = gRate / vatF - gRate * fee - (gRate / vatF) * roy - unitVar;
+    const extraGross = lockerGross + s.otherRev;
+    const k = extraGross / vatF - extraGross * fee - (extraGross / vatF) * roy;
+    const dep = s.includeDep && s.investMonths > 0 ? s.invest / s.investMonths : 0;
+    const fixedBase = s.fixed.reduce((a, [, v]) => a + v, 0);
+    const F = fixedBase + dep;
+
+    const at = occ => {
+      const H = cap * occ;
+      const items = prods.map(x => {
+        const h = H * x.w;
+        return { ...x, h, sales: x.per > 0 ? h / x.per : 0, rev: h * x.rate / vatF };
+      });
+      const sum = (g, key) => items.filter(i => i.g === g).reduce((a, i) => a + i[key], 0);
+      const gross = H * gRate + extraGross;
+      const net = gross / vatF;
+      const feeCost = gross * fee;
+      const royCost = net * roy;
+      const utilCost = H * s.utilVar;
+      const supplyCost = H * s.supplyVar;
+      const varCost = feeCost + royCost + utilCost + supplyCost;
+      const contrib = net - varCost;
+      return { occ, H, items, gross, net, feeCost, royCost, utilCost, supplyCost, varCost, contrib,
+        profit: contrib - F, rev: g => sum(g, 'rev'), salesOf: g => sum(g, 'sales'),
+        lockerRev: lockerGross / vatF, otherRev: s.otherRev / vatF,
+        sales: items.reduce((a, i) => a + i.sales, 0) };
+    };
+    let bep;
+    if (cap <= 0 || m <= 0) bep = (F - k) <= 0 ? 0 : Infinity;
+    else bep = Math.max(0, (F - k) / (cap * m));
+    return { s, prods, shareSum, lockerPlans, lkSum, perLocker, rented, lockerGross, cap, gRate, vatF, m, k, F, fixedBase, dep, at, bep };
+  }
+
+  // ---------- 렌더 ----------
+  function niceStep(range, target) {
+    const raw = range / target, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+    return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * p;
+  }
+
+  function renderChart(M, occ) {
+    const W = 600, H = 250, L = 58, R = 16, T = 18, B = 34;
+    const reach = Math.max(isFinite(M.bep) ? M.bep : 0, occ);
+    const xMax = Math.min(1, Math.max(0.6, Math.ceil(reach * 1.5 * 10) / 10));
+    const p0 = M.at(0).profit, p1 = M.at(xMax).profit;
+    let yMin = Math.min(p0, p1, 0), yMax = Math.max(p0, p1, 0);
+    if (yMax - yMin < 1) { yMax += 1e6; yMin -= 1e6; }
+    const step = niceStep(yMax - yMin, 5);
+    yMin = Math.floor(yMin / step) * step; yMax = Math.ceil(yMax / step) * step;
+    const x = o => L + (o / xMax) * (W - L - R);
+    const y = v => T + (yMax - v) / (yMax - yMin) * (H - T - B);
+    let g = '';
+    for (let v = yMin; v <= yMax + step / 2; v += step) {
+      g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="${Math.abs(v) < step / 2 ? 1.5 : 1}" ${Math.abs(v) < step / 2 ? '' : 'stroke-dasharray="2 4"'}/>`;
+      g += `<text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${Math.round(v / 10000).toLocaleString('ko-KR')}</text>`;
+    }
+    const xStep = xMax <= 0.6 ? 0.1 : 0.2;
+    for (let o = 0; o <= xMax + 1e-9; o += xStep) {
+      g += `<text x="${x(o)}" y="${H - 12}" text-anchor="middle">${Math.round(o * 100)}%</text>`;
+    }
+    const z = y(0);
+    const b = isFinite(M.bep) ? Math.min(M.bep, xMax) : xMax;
+    if (b > 0) g += `<polygon points="${x(0)},${z} ${x(0)},${y(p0)} ${x(b)},${y(M.at(b).profit)} ${x(b)},${z}" fill="var(--neg)" fill-opacity="0.14"/>`;
+    if (b < xMax) g += `<polygon points="${x(b)},${z} ${x(xMax)},${y(p1)} ${x(xMax)},${z}" fill="var(--pos)" fill-opacity="0.16"/>`;
+    g += `<line x1="${x(0)}" y1="${y(p0)}" x2="${x(xMax)}" y2="${y(p1)}" stroke="var(--ink)" stroke-width="2"/>`;
+    if (occ <= xMax) {
+      const pc = M.at(occ).profit;
+      g += `<line x1="${x(occ)}" x2="${x(occ)}" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-dasharray="3 3"/>`;
+      g += `<circle cx="${x(occ)}" cy="${y(pc)}" r="4.5" fill="var(--ink)"/>`;
+      const anchor = x(occ) > W - 110 ? 'end' : 'start', dx = anchor === 'end' ? -8 : 8;
+      g += `<text x="${x(occ) + dx}" y="${T + 10}" text-anchor="${anchor}" style="fill:var(--ink)">예상 ${pct(occ)}</text>`;
+    }
+    if (isFinite(M.bep) && M.bep <= xMax) {
+      g += `<circle cx="${x(M.bep)}" cy="${z}" r="5.5" fill="var(--surface)" stroke="var(--accent)" stroke-width="2.5"/>`;
+      const anchor = x(M.bep) > W - 120 ? 'end' : 'start', dx = anchor === 'end' ? -10 : 10;
+      g += `<text x="${x(M.bep) + dx}" y="${z + (p0 < 0 ? -10 : 18)}" text-anchor="${anchor}" style="fill:var(--accent);font-weight:600">손익분기 ${pct(M.bep)}</text>`;
+    }
+    $('chart').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="가동률에 따른 월 영업이익 그래프">${g}</svg>`;
+  }
+
+  function renderInputs(M) {
+    // 좌석 이용권 카드 헤더·메모
+    M.prods.forEach(x => {
+      const el = x.r.el, r = x.r;
+      el.querySelector('.sw').style.background = x.color;
+      el.querySelector('.pname').textContent = x.name;
+      el.querySelector('.rl').textContent = '실질';
+      el.querySelector('.rv').textContent = x.per > 0 ? won(x.rate) + '/시간' : '–';
+      const note = el.querySelector('.pnote');
+      let txt = '', bad = false;
+      if (x.g === 'once') {
+        if (!(r.hours > 0)) txt = '이용 시간을 직접 정해 주세요. 예: 2, 3, 4, 6, 8, 12, 24시간';
+        else if (r.use > 100) { txt = '실사용률은 100%를 넘을 수 없습니다.'; bad = true; }
+        else txt = `1장 = 좌석 ${fmtH(x.per)}시간 이용 · 정가 ${won(r.price / r.hours)}/시간 · 실사용률을 비우면 100%로 계산`;
+      }
+      if (x.g === 'period') {
+        if (r.days > 0 && r.visits > r.days) { txt = '방문 횟수가 기간(일)보다 많습니다.'; bad = true; }
+        else if (!(x.per > 0)) txt = '기간 중 방문 횟수와 1회 평균 이용시간을 넣어 주세요.';
+        else txt = `1장 = 기간 중 좌석 ${fmtH(x.per)}시간 이용`;
+      }
+      if (x.g === 'time' && !(r.hours > 0)) txt = '충전 시간을 직접 정해 주세요. 예: 30, 50, 100, 200시간';
+      else if (x.g === 'time') {
+        const unused = Math.max(100 - r.use, 0);
+        txt = (r.valid > 0 ? `${num(r.valid)}일 안에 하루 평균 ${num(r.hours / r.valid, 1)}시간씩 써야 소진` : '유효기간을 넣어 주세요') +
+          (unused ? ` · 미사용 ${num(unused)}%(${fmtH(r.hours * unused / 100)}시간)는 좌석 없이 남는 매출` : '');
+      }
+      note.textContent = txt;
+      note.classList.toggle('bad', bad);
+    });
+    // 사물함 요금제 카드
+    M.lockerPlans.forEach(p => {
+      const el = p.r.el;
+      el.querySelector('.sw').style.background = p.color;
+      el.querySelector('.pname').textContent = GROUPS.locker.label(p.r);
+      el.querySelector('.rl').textContent = '월 환산';
+      el.querySelector('.rv').textContent = p.r.weeks > 0 ? won(p.monthly) : '–';
+      el.querySelector('.pnote').textContent = p.r.weeks > 0 ? `주당 ${won(p.r.price / p.r.weeks)} · 한 달(4.29주)에 ${num(WEEKS_PER_MONTH / p.r.weeks, 2)}번 결제되는 셈` : '대여 기간을 넣어 주세요';
+    });
+    // 비중 막대
+    $('mixbar').innerHTML = M.prods.map(x => `<i style="width:${(x.w * 100).toFixed(2)}%;background:${x.color}" title="${x.name}"></i>`).join('');
+    $('mixLegend').innerHTML = SEAT_GROUPS.map(g => {
+      const w = M.prods.filter(x => x.g === g).reduce((a, x) => a + x.w, 0);
+      return `<span><span class="sw" style="background:${GROUPS[g].color}"></span>${GROUPS[g].name} <b>${num(w * 100, 0)}%</b></span>`;
+    }).join('') + `<span>· 상품 ${M.prods.length}개</span>`;
+    const w = $('mixWarn');
+    if (M.shareSum > 0 && Math.abs(M.shareSum - 100) > 0.05) { w.hidden = false; w.textContent = `이용 비중 합계가 ${num(M.shareSum, 1)}%입니다. 비율대로 환산해 계산합니다.`; }
+    else w.hidden = true;
+    $('mixRate').textContent = won(M.gRate) + ' / 시간';
+    const lw = $('lockerWarn');
+    if (M.lockerPlans.length > 1 && M.lkSum <= 0) { lw.hidden = false; lw.textContent = '대여 비중이 비어 있어 요금제별로 똑같이 나눠 계산합니다.'; }
+    else if (M.lockerPlans.length && Math.abs(M.lkSum - 100) > 0.05) { lw.hidden = false; lw.textContent = `대여 비중 합계가 ${num(M.lkSum, 1)}%입니다. 비율대로 환산해 계산합니다.`; }
+    else lw.hidden = true;
+    $('lockerSumLabel').textContent = `사물함 월 매출 · ${num(M.rented, 1)}개 대여 × 평균 ${won(M.perLocker)}`;
+    $('lockerSum').textContent = won(M.lockerGross);
+  }
+
+  function update() {
+    const s = readState();
+    save();
+    const M = model(s);
+    const occBlank = $('occ').value.trim() === '';
+    const occ = Math.min(Math.max(s.occ, 0), 100) / 100;
+    const cur = M.at(occ);
+
+    renderInputs(M);
+    $('fxSum').textContent = won(M.fixedBase);
+    $('depNote').textContent = `월 ${won(s.investMonths > 0 ? s.invest / s.investMonths : 0)}를 비용으로 잡습니다. 끄면 현금 기준 손익분기를 봅니다.`;
+
+    // 필수 값이 비어 있으면 결과 대신 안내만 보여줌
+    const missing = [];
+    if (!(s.seats > 0)) missing.push('좌석 수');
+    if (!(s.hours > 0)) missing.push('하루 운영시간');
+    if (!(s.days > 0)) missing.push('월 영업일');
+    if (!(M.shareSum > 0)) missing.push('이용권 이용 비중');
+    else if (!(M.gRate > 0)) missing.push('이용권 가격·이용시간');
+    const ready = !missing.length;
+    $('resultEmpty').hidden = ready;
+    document.querySelectorAll('.result > .card:not(#resultEmpty)').forEach(c => c.hidden = !ready);
+    if (!ready) {
+      $('emptyList').textContent = missing.join(', ');
+      $('mBep').textContent = '–';
+      $('mOcc').textContent = '';
+      $('mProfit').textContent = '값을 입력해 주세요';
+      $('mProfit').className = '';
+      return;
+    }
+
+    // 손익분기 핵심
+    const ok = isFinite(M.bep) && M.bep <= 1;
+    const bepTxt = !isFinite(M.bep) ? '불가' : M.bep > 1 ? '100%+' : (M.bep * 100).toFixed(1);
+    $('bepNum').innerHTML = ok ? `${bepTxt}<small>%</small>` : bepTxt;
+    $('mBep').textContent = ok ? bepTxt + '%' : bepTxt;
+    if (M.m <= 0) {
+      $('bepDesc').innerHTML = '좌석 1시간을 팔 때마다 손해입니다. 단가를 올리거나 변동비를 줄여야 합니다.';
+    } else if (!ok) {
+      $('bepDesc').innerHTML = '좌석이 100% 차도 고정비를 못 덮습니다. 고정비를 줄이거나 단가를 올려야 합니다.';
+    } else {
+      const seatHoursDay = M.bep * s.seats * s.hours;
+      $('bepDesc').innerHTML = `하루 <b>${num(seatHoursDay)} 좌석시간</b> 이용<br>= 평균 <b>${num(M.bep * s.seats, 1)}석</b>이 ${num(s.hours, 0)}시간 내내 차 있는 수준`;
+    }
+    const chip = cur.profit >= 0 ? 'pos' : 'neg';
+    const gap = ok ? (occ - M.bep) * 100 : null;
+    $('status').innerHTML = occBlank
+      ? '<span>예상 가동률을 입력하면 흑자·적자 금액을 보여줍니다.</span>'
+      : `<span class="chip ${chip}"><i></i>${cur.profit >= 0 ? '흑자' : '적자'} ${signedMan(cur.profit)} / 월</span>` +
+        `<span>예상 가동률 ${pct(occ)} 기준` + (gap !== null ? ` · 손익분기보다 ${Math.abs(gap).toFixed(1)}%p ${gap >= 0 ? '높음' : '낮음'}` : '') + `</span>`;
+    const atB = ok ? M.at(M.bep) : null;
+    $('kBepRev').textContent = atB ? man(atB.net) : '–';
+    $('kSales').textContent = atB ? num(Math.ceil(atB.sales)) + '장' : '–';
+    $('kUnit').textContent = won(M.m);
+    $('mOcc').textContent = pct(occ);
+    $('mProfit').textContent = signedMan(cur.profit);
+    $('mProfit').className = cur.profit >= 0 ? 'pos-t' : 'neg-t';
+
+    // 좌석 배치도
+    const n = Math.max(0, Math.min(Math.round(s.seats), 300));
+    const curSeats = occ * s.seats, needSeats = ok ? M.bep * s.seats : Infinity;
+    let html = '';
+    for (let i = 0; i < n; i++) {
+      const fill = Math.min(Math.max(curSeats - i, 0), 1);
+      const cls = ['seat'];
+      if (fill >= 1) cls.push('on'); else if (fill > 0) cls.push('part');
+      if (i < Math.ceil(needSeats)) cls.push('need');
+      html += `<div class="${cls.join(' ')}"${fill > 0 && fill < 1 ? ` style="--p:${(fill * 100).toFixed(0)}%"` : ''}></div>`;
+    }
+    $('seats-map').innerHTML = html;
+    $('seatNote').textContent = (s.seats > 300 ? '앞 300석만 표시합니다. ' : '') +
+      `운영시간 내내 평균 ${num(curSeats, 1)}석이 쓰이는 가정입니다` +
+      (ok ? `. 손익분기에는 ${num(needSeats, 1)}석이 필요합니다.` : '.');
+
+    // 이용권별 판매 표
+    let body = '';
+    SEAT_GROUPS.forEach(g => {
+      const rows = cur.items.map((it, i) => [it, i]).filter(([it]) => it.g === g);
+      if (!rows.length) return;
+      body += `<tr class="grp"><td colspan="6">${GROUPS[g].name}</td></tr>`;
+      body += rows.map(([it, i]) => {
+        const b = atB ? atB.items[i] : null;
+        return `<tr><td><span class="nm"><span class="sw" style="background:${it.color}"></span>${it.name}</span></td>` +
+          `<td>${num(it.w * 100)}%</td><td>${it.per > 0 ? won(it.rate) : '–'}</td>` +
+          `<td class="hl">${b ? num(Math.ceil(b.sales)) + '장' : '–'}</td><td>${num(it.sales, 1)}장</td><td>${man(it.rev)}</td></tr>`;
+      }).join('');
+    });
+    $('prodTbl').innerHTML =
+      '<thead><tr><th>상품</th><th>비중</th><th>실질 단가</th><th>손익분기 판매</th><th>예상 판매</th><th>예상 매출</th></tr></thead><tbody>' + body +
+      `</tbody><tfoot><tr><td>합계</td><td></td><td>${won(M.gRate)}</td><td class="hl">${atB ? num(Math.ceil(atB.sales)) + '장' : '–'}</td><td>${num(cur.sales, 1)}장</td><td>${man(SEAT_GROUPS.reduce((a, g) => a + cur.rev(g), 0))}</td></tr></tfoot>`;
+
+    // 손익계산서
+    const neg = v => v ? '−' + won(v) : won(0);
+    const rows = [
+      ['mid', '매출 (공급가)', won(cur.net)],
+      ...SEAT_GROUPS.map(g => ['minor', `${GROUPS[g].name} · 월 ${num(cur.salesOf(g))}장`, won(cur.rev(g))]),
+      ['minor', `사물함 · ${num(M.rented, 1)}개 대여`, won(cur.lockerRev)],
+      ...(s.otherRev ? [['minor', '기타 매출', won(cur.otherRev)]] : []),
+      ['mid', '변동비', neg(cur.varCost)],
+      ['minor', '결제수수료', neg(cur.feeCost)],
+      ...(s.royalty ? [['minor', '로열티', neg(cur.royCost)]] : []),
+      ['minor', '전기·냉난방 변동분', neg(cur.utilCost)],
+      ['minor', '소모품', neg(cur.supplyCost)],
+      ['mid', '공헌이익', won(cur.contrib)],
+      ['mid', '고정비', neg(M.F)],
+      ...(M.dep ? [['minor', '그중 감가상각비', neg(M.dep)]] : []),
+    ];
+    $('pl').innerHTML = rows.map(([c, a, b]) => `<tr class="${c}"><td>${a}</td><td>${b}</td></tr>`).join('') +
+      `<tr class="total"><td>영업이익</td><td class="${cur.profit >= 0 ? 'pos-t' : 'neg-t'}">${(cur.profit >= 0 ? '+' : '−') + won(Math.abs(cur.profit))}</td></tr>`;
+    const cash = cur.profit + M.dep;
+    $('plCaption').textContent = (occBlank ? '예상 가동률 미입력 · 0% 기준' : `가동률 ${pct(occ)} · 월 ${num(cur.H)} 좌석시간`) +
+      (s.invest > 0 && cash > 0 ? ` · 투자 회수 약 ${num(s.invest / cash, 1)}개월` : s.invest > 0 ? ' · 투자 회수 불가' : '');
+
+    renderChart(M, occ);
+
+    // 민감도 표
+    const levels = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6];
+    if (!levels.some(l => Math.abs(l - occ) < 1e-9)) levels.push(occ);
+    levels.sort((a, b) => a - b);
+    let flipped = false;
+    $('sens').innerHTML = '<tr><th>가동률</th><th>하루 이용</th><th>월 이용권 판매</th><th>월 매출</th><th>월 영업이익</th></tr>' +
+      levels.map(l => {
+        const r = M.at(l);
+        const flip = !flipped && r.profit >= 0; if (flip) flipped = true;
+        const cls = [Math.abs(l - occ) < 1e-9 ? 'cur' : '', flip ? 'flip' : ''].join(' ');
+        return `<tr class="${cls}"><td>${pct(l)}</td><td>${num(r.H / s.days)}시간</td><td>${num(r.sales)}장</td><td>${man(r.net)}</td><td class="${r.profit >= 0 ? 'pos-t' : 'neg-t'}">${signedMan(r.profit)}</td></tr>`;
+      }).join('');
+  }
+
+  // ---------- 이벤트 ----------
+  document.addEventListener('input', e => {
+    const el = e.target;
+    if (el.classList.contains('money')) formatMoney(el);
+    if (el.id === 'occRange') $('occ').value = el.value;
+    if (el.id === 'occ') $('occRange').value = el.value;
+    update();
+  });
+  document.addEventListener('change', e => { if (e.target.type === 'checkbox') update(); });
+  document.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => {
+    const g = b.dataset.add;
+    addItemRow(g, {}, true);
+    update();
+  }));
+  $('fxAdd').addEventListener('click', () => { addFixedRow('', '', true); update(); });
+  $('fillExample').addEventListener('click', () => { applyState(EXAMPLE); update(); });
+  $('clearAll').addEventListener('click', () => { applyState(BLANK); update(); });
+
+  SCALARS.forEach(k => setExample($(k), EXAMPLE[k]));
+  // ?example 로 열면 예시값이 채워진 상태로 시작 (데모 링크용)
+  const wantsExample = new URLSearchParams(location.search).has('example');
+  applyState(wantsExample ? EXAMPLE : (load() || BLANK));
+  update();
+})();
+</script>
+</body>
+</html>
